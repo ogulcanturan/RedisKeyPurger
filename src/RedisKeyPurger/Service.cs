@@ -40,26 +40,38 @@ namespace RedisKeyPurger
 
                 try
                 {
+                    _logger.LogInformation("Retrieving uncompleted keys from file...");
+
                     keys = (await File.ReadAllLinesAsync(filePath))?.ToList();
                 }
                 catch (FileNotFoundException)
                 {
+                    _logger.LogInformation("Uncompleted keys not found.");
                 }
 
                 if (keys == null || string.Join("", keys).Length == 0)
                 {
+                    _logger.LogInformation("Retrieving keys from redis...");
+
                     keys = await GetSafeRedisKeysAsync(keyPattern, filePath);
                 }
+
+                _logger.LogInformation("Retrieving completed. Key count: {keyCount}", keys.Count);
 
                 var redisKeys = keys.Select(k => new RedisKey(k)).ToArray();
 
                 var iteration = redisKeys.Length / _options.BatchPurgeSize;
 
-                _logger.LogInformation("Purging started. Total Iteration: {totalIteration}, Batch purge size: {batchPurgeSize}", iteration + 1, _options.BatchPurgeSize);
+                var totalIteration = iteration + 1;
+
+                _logger.LogInformation("Purging started. Total iteration: {totalIteration}, Batch purge size: {batchPurgeSize}", totalIteration, _options.BatchPurgeSize);
 
                 for (var i = 0; i <= iteration; i++)
                 {
-                    _logger.LogInformation("Current iteration: {currentIteration}", i + 1);
+                    var currentIteration = i + 1;
+                    var remainingIteration = totalIteration - currentIteration;
+
+                    _logger.LogInformation("Current iteration: {currentIteration} - Remaining iteration: {remainingIteration}", currentIteration, remainingIteration);
 
                     var removedKeys = redisKeys.Skip(_options.BatchPurgeSize * i).Take(_options.BatchPurgeSize).ToArray();
                     var result = 0L;
@@ -90,7 +102,7 @@ namespace RedisKeyPurger
                     removedCount += result;
                 }
 
-                _logger.LogInformation("Removed count: {removedCount}", removedCount);
+                _logger.LogInformation("Purged count: {removedCount}", removedCount);
 
                 if (keys.Count == 0)
                 {
@@ -98,6 +110,8 @@ namespace RedisKeyPurger
                 }
 
                 FileRemoveIfExists(filePath);
+
+                _logger.LogInformation("Preparing for the next loop...");
             }
 
             _logger.LogInformation("No further results found. Application is stopping...");
