@@ -13,4 +13,4 @@ var keyPattern = configuration.GetValue<string>("KeyPattern");
 
 logger.LogInformation("Application started!");
 
-await service.DeleteAsync(keyPattern);
+await service.PurgeAsync(keyPattern);

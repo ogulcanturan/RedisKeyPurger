@@ -4,12 +4,16 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace RedisKeyPurger
 {
     public class Service
     {
+        private static readonly char[] ForbiddenCharacters = new[] { '\\', '/', ':', '*', '?', '"', '<', '>', '|' };
+        private static readonly Regex ForbiddenRegex = new Regex($"[{Regex.Escape(new string(ForbiddenCharacters))}]", RegexOptions.Compiled);
+
         private readonly ILogger _logger;
         private readonly Task<ConnectionMultiplexer> _connectionTask;
         private readonly KeyPurgeOptions _options;
@@ -21,7 +25,7 @@ namespace RedisKeyPurger
             _options = options;
         }
 
-        public async Task DeleteAsync(string keyPattern)
+        public async Task PurgeAsync(string keyPattern)
         {
             if (keyPattern == null)
             {
@@ -30,9 +34,14 @@ namespace RedisKeyPurger
 
             var removedCount = 0L;
 
-            const string filePath = nameof(DeleteAsync);
+            var filePath = $"{nameof(PurgeAsync)}-{GetSlug(keyPattern)}";
 
             var connection = await _connectionTask;
+
+            if (connection.IsConnected)
+            {
+                _logger.LogInformation("Redis connection established!");
+            }
 
             while (true)
             {
@@ -58,6 +67,11 @@ namespace RedisKeyPurger
 
                 _logger.LogInformation("Retrieving completed. Key count: {keyCount}", keys.Count);
 
+                if (keys.Count == 0)
+                {
+                    break;
+                }
+
                 var redisKeys = keys.Select(k => new RedisKey(k)).ToArray();
 
                 var iteration = redisKeys.Length / _options.BatchPurgeSize;
@@ -75,6 +89,7 @@ namespace RedisKeyPurger
 
                     var removedKeys = redisKeys.Skip(_options.BatchPurgeSize * i).Take(_options.BatchPurgeSize).ToArray();
                     var result = 0L;
+
                     try
                     {
                         result = await connection.GetDatabase().KeyDeleteAsync(removedKeys);
@@ -103,11 +118,6 @@ namespace RedisKeyPurger
                 }
 
                 _logger.LogInformation("Purged count: {removedCount}", removedCount);
-
-                if (keys.Count == 0)
-                {
-                    break;
-                }
 
                 FileRemoveIfExists(filePath);
 
@@ -173,6 +183,11 @@ namespace RedisKeyPurger
             {
                 File.Delete(filePath);
             }
+        }
+
+        private static string GetSlug(string keyPattern)
+        {
+            return ForbiddenRegex.Replace(keyPattern, string.Empty);
         }
     }
 }
